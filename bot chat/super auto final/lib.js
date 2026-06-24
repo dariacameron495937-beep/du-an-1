@@ -399,6 +399,134 @@
     return { url: url, token: token };
   }
 
+  // --- Phone activity analyzer ---------------------------------------------
+  // This helper only ranks user-provided activity data. It does not discover,
+  // scrape, or verify phone-number activity from third-party services.
+
+  function parsePhoneActivityDate(value, nowMs) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return null;
+
+    const relative = normalizeForMatch(raw);
+    const relativeMatch = relative.match(/^(\d+)\s*(?:ngay|day|days)\s*(?:truoc|ago)?$/);
+    if (relativeMatch) {
+      return new Date((Number(nowMs) || Date.now()) - Number(relativeMatch[1]) * 24 * 60 * 60 * 1000);
+    }
+    if (/^(hom nay|today|vua xong|now|online)$/.test(relative)) {
+      return new Date(Number(nowMs) || Date.now());
+    }
+    if (/^(hom qua|yesterday)$/.test(relative)) {
+      return new Date((Number(nowMs) || Date.now()) - 24 * 60 * 60 * 1000);
+    }
+
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed;
+
+    const vnMatch = raw.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(?:\s+(\d{1,2}):(\d{2}))?$/);
+    if (vnMatch) {
+      const date = new Date(
+        Number(vnMatch[3]),
+        Number(vnMatch[2]) - 1,
+        Number(vnMatch[1]),
+        Number(vnMatch[4] || 0),
+        Number(vnMatch[5] || 0)
+      );
+      return Number.isNaN(date.getTime()) ? null : date;
+    }
+
+    return null;
+  }
+
+  function normalizePhoneNumber(value) {
+    const raw = String(value == null ? "" : value).trim();
+    if (!raw) return "";
+    const hasPlus = /^\s*\+/.test(raw);
+    const digits = raw.replace(/[^0-9]/g, "");
+    return digits ? (hasPlus ? "+" : "") + digits : "";
+  }
+
+  function parsePhoneActivityParts(parts) {
+    const values = (parts || []).map(function (part) { return String(part || "").trim(); });
+    let platform = "";
+    let consent = false;
+    let lastActiveRaw = "";
+
+    values.forEach(function (value) {
+      const normalized = normalizeForMatch(value);
+      if (!platform && /^(telegram|zalo|tg)$/.test(normalized)) {
+        platform = normalized === "tg" ? "Telegram" : value;
+        return;
+      }
+      if (/^(opt[ -]?in|consent|dong y|da dong y|yes|true|co)$/.test(normalized)) {
+        consent = true;
+        return;
+      }
+      if (/^(no|false|khong|chua dong y|spam)$/.test(normalized)) {
+        consent = false;
+        return;
+      }
+      if (!lastActiveRaw) {
+        lastActiveRaw = value;
+      }
+    });
+
+    return {
+      platform: platform,
+      consent: consent,
+      lastActiveRaw: lastActiveRaw
+    };
+  }
+
+  function analyzePhoneActivity(input, options) {
+    const opts = options || {};
+    const nowMs = Number(opts.nowMs) || Date.now();
+    const recentDays = Math.max(0, Number(opts.recentDays == null ? 30 : opts.recentDays));
+    const requireConsent = opts.requireConsent !== false;
+    const lines = String(input == null ? "" : input)
+      .replace(/\r\n?/g, "\n")
+      .split("\n")
+      .map(function (line) { return line.trim(); })
+      .filter(Boolean);
+
+    const rows = [];
+    lines.forEach(function (line, index) {
+      const parts = line.split(/[;,\t|]/).map(function (part) { return part.trim(); });
+      const phone = normalizePhoneNumber(parts[0]);
+      if (!phone || /^phone|so dien thoai|sdt$/i.test(parts[0])) return;
+
+      const parsedParts = parsePhoneActivityParts(parts.slice(1));
+      const lastActiveAt = parsePhoneActivityDate(parsedParts.lastActiveRaw, nowMs);
+      const daysSinceActive = lastActiveAt
+        ? Math.max(0, Math.floor((nowMs - lastActiveAt.getTime()) / (24 * 60 * 60 * 1000)))
+        : null;
+      const isRecentlyActive = daysSinceActive !== null && daysSinceActive <= recentDays;
+      const isEligible = isRecentlyActive && (!requireConsent || parsedParts.consent);
+
+      rows.push({
+        phone: phone,
+        platform: parsedParts.platform,
+        consent: parsedParts.consent,
+        lastActiveRaw: parsedParts.lastActiveRaw,
+        lastActiveAt: lastActiveAt ? lastActiveAt.toISOString() : "",
+        daysSinceActive: daysSinceActive,
+        isRecentlyActive: isRecentlyActive,
+        isEligible: isEligible,
+        sourceLine: index + 1
+      });
+    });
+
+    rows.sort(function (a, b) {
+      if (a.isEligible !== b.isEligible) return a.isEligible ? -1 : 1;
+      if (a.daysSinceActive === null && b.daysSinceActive === null) return a.sourceLine - b.sourceLine;
+      if (a.daysSinceActive === null) return 1;
+      if (b.daysSinceActive === null) return -1;
+      return a.daysSinceActive - b.daysSinceActive;
+    });
+
+    return rows;
+  }
+
+
   return {
     SENSITIVE_PARAM_NAMES: SENSITIVE_PARAM_NAMES,
     NON_RECOVERABLE_PATTERNS: NON_RECOVERABLE_PATTERNS,
@@ -416,6 +544,10 @@
     detectExpectedSectionCount: detectExpectedSectionCount,
     detectNumberedOutlineCount: detectNumberedOutlineCount,
     extractLeadingScriptSectionNumber: extractLeadingScriptSectionNumber,
-    splitWebAppUrlAndToken: splitWebAppUrlAndToken
+    splitWebAppUrlAndToken: splitWebAppUrlAndToken,
+    parsePhoneActivityDate: parsePhoneActivityDate,
+    normalizePhoneNumber: normalizePhoneNumber,
+    parsePhoneActivityParts: parsePhoneActivityParts,
+    analyzePhoneActivity: analyzePhoneActivity
   };
 });

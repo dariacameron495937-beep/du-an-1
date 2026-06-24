@@ -76,6 +76,39 @@
         </div>
       </section>
 
+
+
+      <section class="panel" id="phone-activity-panel">
+        <div class="panel-header">
+          <h2>Tool kiểm tra hoạt động SĐT</h2>
+        </div>
+        <p class="helper-text">Dán dữ liệu bạn đã có theo dạng: <strong>số điện thoại, nền tảng, ngày online gần nhất, opt-in</strong>. Hỗ trợ nhãn Telegram/Zalo nếu có trong dữ liệu. Tool chỉ phân tích dữ liệu nhập vào, không tự truy cập, dò trạng thái riêng tư hoặc spam nền tảng khác.</p>
+        <textarea id="phone-activity-input" placeholder="Ví dụ:
+0987654321, Telegram, hôm nay, opt-in
++84901234567, Zalo, 2026-06-20, opt-in
+0911222333, Telegram, 5 ngày trước, no"></textarea>
+        <div class="phone-tool-controls">
+          <label for="recent-days-input">Đánh dấu còn hoạt động trong</label>
+          <input type="number" id="recent-days-input" min="0" max="3650" value="30" />
+          <span>ngày</span>
+          <label class="checkbox-inline"><input type="checkbox" id="require-consent-input" checked /> Chỉ lấy opt-in</label>
+          <button id="btn-analyze-phones" class="btn btn-secondary btn-small">Phân tích</button>
+        </div>
+        <div class="form-group">
+          <label for="campaign-text-input">Nội dung gửi hợp lệ (không spam):</label>
+          <textarea id="campaign-text-input" placeholder="Soạn nội dung cho danh sách đã opt-in. Có thể dùng {phone}, {platform}, {days}."></textarea>
+        </div>
+        <div class="form-group">
+          <label for="campaign-image-input">Link ảnh đính kèm (tuỳ chọn):</label>
+          <input type="text" id="campaign-image-input" placeholder="https://.../image.jpg" />
+        </div>
+        <div class="phone-tool-controls">
+          <button id="btn-build-campaign" class="btn btn-secondary btn-small">Tạo hàng chờ hợp lệ</button>
+        </div>
+        <div id="phone-activity-summary" class="phone-activity-summary">Chưa có dữ liệu phân tích.</div>
+        <div id="phone-activity-results" class="phone-activity-results"></div>
+      </section>
+
       <!-- Control Panel -->
       <section class="panel" id="control-panel">
         <div class="control-buttons">

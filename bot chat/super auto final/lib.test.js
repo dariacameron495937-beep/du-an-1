@@ -268,3 +268,48 @@ test("isMeaningfulJobProgressEvent: ignores passive waiting heartbeats", () => {
   assert.equal(lib.isMeaningfulJobProgressEvent("response_generating", 1200, 1200), false);
   assert.equal(lib.isMeaningfulJobProgressEvent("generation_stopped", 1200, 1200), true);
 });
+
+// --- phone activity analyzer ----------------------------------------------
+
+test("analyzePhoneActivity: ranks user-provided phone activity by most recent", () => {
+  const rows = lib.analyzePhoneActivity(
+    "+84 901 234 567, 2026-06-20\n0987654321, hôm nay\n0911222333, 5 ngày trước",
+    { nowMs: Date.UTC(2026, 5, 24, 12), recentDays: 3 }
+  );
+
+  assert.equal(rows.length, 3);
+  assert.equal(rows[0].phone, "0987654321");
+  assert.equal(rows[0].daysSinceActive, 0);
+  assert.equal(rows[0].isRecentlyActive, true);
+  assert.equal(rows[1].phone, "+84901234567");
+  assert.equal(rows[1].daysSinceActive, 4);
+  assert.equal(rows[1].isRecentlyActive, false);
+});
+
+test("analyzePhoneActivity: keeps invalid dates but sorts them last", () => {
+  const rows = lib.analyzePhoneActivity(
+    "phone,last_online\n0900000000, không rõ\n0911111111, yesterday",
+    { nowMs: Date.UTC(2026, 5, 24, 12), recentDays: 2 }
+  );
+
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].phone, "0911111111");
+  assert.equal(rows[0].daysSinceActive, 1);
+  assert.equal(rows[1].phone, "0900000000");
+  assert.equal(rows[1].daysSinceActive, null);
+});
+
+test("analyzePhoneActivity: supports Telegram/Zalo labels and opt-in eligibility", () => {
+  const rows = lib.analyzePhoneActivity(
+    "0987654321, Telegram, hôm nay, opt-in\n0900000000, Zalo, hôm nay, no",
+    { nowMs: Date.UTC(2026, 5, 24, 12), recentDays: 1 }
+  );
+
+  assert.equal(rows[0].phone, "0987654321");
+  assert.equal(rows[0].platform, "Telegram");
+  assert.equal(rows[0].consent, true);
+  assert.equal(rows[0].isEligible, true);
+  assert.equal(rows[1].platform, "Zalo");
+  assert.equal(rows[1].consent, false);
+  assert.equal(rows[1].isEligible, false);
+});
