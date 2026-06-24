@@ -1,0 +1,10 @@
+{
+  "name": "chatgpt-auto-pilot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome MV3 extension that automates ChatGPT web via a Google Sheet backend.",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check background.js && node --check content.js && node --check popup.js && node --check lib.js && node --check google_apps_script.js"
+  }
+}
