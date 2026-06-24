@@ -223,7 +223,7 @@ test("a new topic resets the first-continue checkpoint", async () => {
   const state = firstResponseState({
     sheetWorkflowState: "GENERATE_SCRIPT",
     currentTopic: "Topic B",
-    promptND: "Write a script for {TOPIC}",
+    promptND: "Write a 3 section script for {TOPIC} and wait for CONTINUE",
     activeJobId: null,
     activeJobStage: null,
     scriptOutline: "old outline",
@@ -249,4 +249,34 @@ test("a new topic resets the first-continue checkpoint", async () => {
   assert.equal(sentPrompts.length, 2);
   assert.equal(sentPrompts[1].prompt.includes("TIẾP TỤC THEO CẤU HÌNH"), true);
   assert.equal(saveCalls.length, 0);
+});
+
+test("single-turn script prompts are saved without first continue workflow", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "GENERATE_SCRIPT",
+    currentTopic: "Topic C",
+    promptND: "Write a complete script for {TOPIC}",
+    activeJobId: null,
+    activeJobStage: null,
+    scriptOutline: "",
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.runWorkflowStep();
+
+  assert.equal(sentPrompts.length, 1);
+  assert.equal(state.activeJobStage, "script_single");
+
+  await api.handleResponseComplete({
+    jobId: state.activeJobId,
+    response: "Complete single-turn script"
+  });
+
+  assert.equal(state.lastGeneratedScript, "Complete single-turn script");
+  assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
+  assert.equal(state.activeJobId, null);
 });
