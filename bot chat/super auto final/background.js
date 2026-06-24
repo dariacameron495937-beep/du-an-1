@@ -2154,6 +2154,7 @@ async function runSheetWorkflowStep(state) {
       const promptTemplate = state.promptND || "Viet kich ban ve: {TOPIC}";
       const finalPrompt = applyPromptPlaceholders(promptTemplate, state, { topic });
       const expectedSections = detectExpectedSections(promptTemplate);
+      const isMultiTurnScript = usesContinueWorkflow(promptTemplate);
 
       await addLog(
         expectedSections
@@ -2163,12 +2164,14 @@ async function runSheetWorkflowStep(state) {
       );
       await setStorage({
         sheetWorkflowState: "WAITING_FOR_SCRIPT",
-        sheetProgressText: "ChatGPT dang tao outline/context ban dau...",
+        sheetProgressText: isMultiTurnScript
+          ? "ChatGPT dang tao outline/context ban dau..."
+          : "ChatGPT dang viet kich ban...",
         scriptOutline: "",
         scriptSections: [],
         scriptSectionNumbers: [],
-        scriptSectionIndex: 1,
-        scriptExpectedSections: expectedSections,
+        scriptSectionIndex: isMultiTurnScript ? 1 : 0,
+        scriptExpectedSections: isMultiTurnScript ? expectedSections : 0,
         scriptLastDiversitySection: 0,
         scriptFinalContinueAttempts: 0,
         scriptFirstContinueSent: false
@@ -2182,7 +2185,7 @@ async function runSheetWorkflowStep(state) {
       });
 
       await startChatGPTJob(finalPrompt, {
-        activeJobStage: "script_outline",
+        activeJobStage: isMultiTurnScript ? "script_outline" : "script_single",
       }, true);
       break;
     }
@@ -2700,6 +2703,19 @@ function isValidImagePromptResponse(text) {
 }
 
 async function handleSheetResponse(state, responseText, domOutlineSectionCount = 0) {
+  if (state.activeJobStage === "script_single") {
+    await setStorage({
+      lastGeneratedScript: responseText,
+      sheetWorkflowState: "SAVE_SCRIPT",
+      sheetProgressText: "Da nhan kich ban. Dang luu vao Google Sheet...",
+      activeJobId: null,
+      activeJobStage: null,
+      activeJobStartedAt: null
+    });
+    requestWorkflowRun();
+    return;
+  }
+
   // "script" is the legacy first-response stage. Treat it as outline too so
   // an in-flight job recovered across an extension update cannot save early.
   if (state.activeJobStage === "script_outline" || state.activeJobStage === "script") {
