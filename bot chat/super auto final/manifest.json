@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "ChatGPT Auto Pilot",
+  "version": "1.0",
+  "description": "Tự động gửi danh sách câu hỏi lên ChatGPT web bằng profile người dùng thật.",
+  "permissions": [
+    "storage",
+    "alarms",
+    "tabs",
+    "scripting",
+    "unlimitedStorage"
+  ],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://script.google.com/*",
+    "https://script.googleusercontent.com/*"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chatgpt.com/*"],
+      "js": ["lib.js", "content.js"]
+    }
+  ]
+}
