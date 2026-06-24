@@ -21,6 +21,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const btnPause = document.getElementById('btn-pause');
   const btnStop = document.getElementById('btn-stop');
   const btnClearLogs = document.getElementById('btn-clear-logs');
+  const phoneActivityInput = document.getElementById('phone-activity-input');
+  const recentDaysInput = document.getElementById('recent-days-input');
+  const btnAnalyzePhones = document.getElementById('btn-analyze-phones');
+  const phoneActivitySummary = document.getElementById('phone-activity-summary');
+  const phoneActivityResults = document.getElementById('phone-activity-results');
+  const requireConsentInput = document.getElementById('require-consent-input');
+  const campaignTextInput = document.getElementById('campaign-text-input');
+  const campaignImageInput = document.getElementById('campaign-image-input');
+  const btnBuildCampaign = document.getElementById('btn-build-campaign');
+  let lastPhoneActivityRows = [];
   
   const statusLabel = document.getElementById('status-label');
   const progressText = document.getElementById('progress-text');
@@ -33,6 +43,108 @@ document.addEventListener('DOMContentLoaded', () => {
   let activeSheetAbortController = null;
   let activeSheetStatusTimer = null;
   let sheetRequestInFlight = false;
+
+
+
+  function analyzePhoneActivityFromInput() {
+    if (!phoneActivityInput || !recentDaysInput || !phoneActivityResults || !phoneActivitySummary) return;
+    const recentDays = parseInt(recentDaysInput.value, 10) || 0;
+    const analyzer = window.AutoPilotLib && window.AutoPilotLib.analyzePhoneActivity;
+    if (typeof analyzer !== 'function') {
+      phoneActivitySummary.innerText = "Không tải được bộ phân tích SĐT.";
+      return;
+    }
+
+    const rows = analyzer(phoneActivityInput.value, {
+      recentDays,
+      requireConsent: !requireConsentInput || requireConsentInput.checked
+    });
+    lastPhoneActivityRows = rows;
+    const recentCount = rows.filter(row => row.isRecentlyActive).length;
+    const eligibleCount = rows.filter(row => row.isEligible).length;
+    phoneActivityResults.innerHTML = '';
+    phoneActivitySummary.innerText = rows.length
+      ? `Tìm thấy ${recentCount}/${rows.length} số hoạt động trong ${recentDays} ngày gần đây nhất; ${eligibleCount} số đủ điều kiện opt-in.`
+      : 'Chưa có dữ liệu hợp lệ. Hãy nhập mỗi dòng gồm số điện thoại và ngày online gần nhất.';
+
+    rows.forEach(row => {
+      const item = document.createElement('div');
+      item.className = `phone-activity-row${row.isEligible ? ' eligible' : ''}${row.isRecentlyActive ? ' recent' : ''}`;
+
+      const phone = document.createElement('div');
+      phone.className = 'phone-activity-phone';
+      phone.innerText = row.platform ? `${row.phone} • ${row.platform}` : row.phone;
+
+      const days = document.createElement('div');
+      days.className = 'phone-activity-days';
+      days.innerText = row.daysSinceActive === null ? 'Không rõ' : `${row.daysSinceActive} ngày`;
+
+      const meta = document.createElement('div');
+      meta.className = 'phone-activity-meta';
+      meta.innerText = row.lastActiveAt
+        ? `Online gần nhất: ${new Date(row.lastActiveAt).toLocaleString()} • ${row.consent ? 'Đã opt-in' : 'Chưa opt-in/không gửi hàng loạt'}`
+        : `Không đọc được ngày từ dòng ${row.sourceLine}: ${row.lastActiveRaw || '(trống)'} • ${row.consent ? 'Đã opt-in' : 'Chưa opt-in/không gửi hàng loạt'}`;
+
+      item.appendChild(phone);
+      item.appendChild(days);
+      item.appendChild(meta);
+      phoneActivityResults.appendChild(item);
+    });
+  }
+
+  function buildCompliantCampaignQueue() {
+    if (!phoneActivityResults || !phoneActivitySummary) return;
+    if (!lastPhoneActivityRows.length) analyzePhoneActivityFromInput();
+    const textTemplate = campaignTextInput ? campaignTextInput.value.trim() : '';
+    const imageUrl = campaignImageInput ? campaignImageInput.value.trim() : '';
+    const eligibleRows = lastPhoneActivityRows.filter(row => row.isEligible);
+
+    if (!textTemplate && !imageUrl) {
+      phoneActivitySummary.innerText = 'Hãy nhập nội dung text hoặc link ảnh trước khi tạo hàng chờ.';
+      return;
+    }
+
+    const queue = eligibleRows.map(row => ({
+      phone: row.phone,
+      platform: row.platform || 'Không rõ',
+      text: textTemplate
+        .replace(/\{phone\}/g, row.phone)
+        .replace(/\{platform\}/g, row.platform || '')
+        .replace(/\{days\}/g, row.daysSinceActive === null ? '' : String(row.daysSinceActive)),
+      imageUrl
+    }));
+
+    phoneActivityResults.innerHTML = '';
+    phoneActivitySummary.innerText = queue.length
+      ? `Đã tạo hàng chờ ${queue.length} tin nhắn hợp lệ để bạn kiểm tra và gửi thủ công qua tài khoản có quyền.`
+      : 'Không có số nào đủ điều kiện opt-in để tạo hàng chờ.';
+
+    queue.forEach(item => {
+      const row = document.createElement('div');
+      row.className = 'phone-activity-row eligible';
+      const target = document.createElement('div');
+      target.className = 'phone-activity-phone';
+      target.innerText = `${item.phone} • ${item.platform}`;
+      const badge = document.createElement('div');
+      badge.className = 'phone-activity-days';
+      badge.innerText = 'Sẵn sàng';
+      const meta = document.createElement('div');
+      meta.className = 'phone-activity-meta';
+      meta.innerText = `${item.text || '(không có text)'}${item.imageUrl ? ` • Ảnh: ${item.imageUrl}` : ''}`;
+      row.appendChild(target);
+      row.appendChild(badge);
+      row.appendChild(meta);
+      phoneActivityResults.appendChild(row);
+    });
+  }
+
+  if (btnAnalyzePhones) {
+    btnAnalyzePhones.addEventListener('click', analyzePhoneActivityFromInput);
+  }
+
+  if (btnBuildCampaign) {
+    btnBuildCampaign.addEventListener('click', buildCompliantCampaignQueue);
+  }
 
   // 2. Xử lý Google Sheets Connection
   btnConnectSheet.addEventListener('click', () => {

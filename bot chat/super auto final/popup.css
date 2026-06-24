@@ -524,3 +524,99 @@ textarea:focus {
   color: var(--text-primary);
   font-weight: 600;
 }
+
+.helper-text {
+  color: var(--text-secondary);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.phone-tool-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+
+.phone-tool-controls input[type="number"] {
+  width: 62px;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 6px;
+  padding: 4px 8px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  text-align: center;
+  outline: none;
+}
+
+.phone-activity-summary {
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.phone-activity-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.phone-activity-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.16);
+  font-size: 11px;
+}
+
+.phone-activity-row.recent {
+  border-color: rgba(16, 185, 129, 0.35);
+  background: rgba(16, 185, 129, 0.08);
+}
+
+.phone-activity-phone {
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.phone-activity-meta {
+  color: var(--text-secondary);
+  grid-column: 1 / -1;
+}
+
+.phone-activity-days {
+  color: var(--accent-blue);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-secondary);
+}
+
+.form-group input[type="text"] {
+  width: 100%;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 8px;
+  padding: 8px 10px;
+  color: var(--text-primary);
+  font-family: var(--font-family);
+  font-size: 12px;
+  outline: none;
+}
+
+.phone-activity-row.eligible {
+  box-shadow: inset 3px 0 0 var(--success-color);
+}
