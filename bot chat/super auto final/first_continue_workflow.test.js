@@ -8,7 +8,7 @@ const ROOT = __dirname;
 const LIB_SOURCE = fs.readFileSync(path.join(ROOT, "lib.js"), "utf8");
 const BACKGROUND_SOURCE = fs.readFileSync(path.join(ROOT, "background.js"), "utf8");
 
-function createChrome(storageState) {
+function createChrome(storageState, options = {}) {
   const event = () => ({ addListener() {}, removeListener() {} });
 
   return {
@@ -40,10 +40,24 @@ function createChrome(storageState) {
     tabs: {
       onUpdated: event(),
       query(_query, callback) {
-        if (callback) return callback([]);
-        return Promise.resolve([]);
+        const tabs = options.chatGptTab ? [options.chatGptTab] : [];
+        if (callback) return callback(tabs);
+        return Promise.resolve(tabs);
+      },
+      get(id, callback) {
+        const tab = options.chatGptTab || { id, url: "https://chatgpt.com/" };
+        if (callback) return callback(tab);
+        return Promise.resolve(tab);
       },
       sendMessage(_id, _message, callback) {
+        if (_message && _message.action === "SYNC_CHAT_HISTORY") {
+          const syncResponse = {
+            success: true,
+            history: Array.isArray(options.chatHistory) ? options.chatHistory : []
+          };
+          if (callback) return callback(syncResponse);
+          return Promise.resolve(syncResponse);
+        }
         if (callback) return callback({ status: "started" });
         return Promise.resolve({ status: "started" });
       }
@@ -51,8 +65,8 @@ function createChrome(storageState) {
   };
 }
 
-function loadBackground(storageState, sentPrompts, saveCalls) {
-  const chrome = createChrome(storageState);
+function loadBackground(storageState, sentPrompts, saveCalls, options = {}) {
+  const chrome = createChrome(storageState, options);
   const context = {
     chrome,
     console,
@@ -279,4 +293,213 @@ test("single-turn script prompts are saved without first continue workflow", asy
   assert.equal(state.lastGeneratedScript, "Complete single-turn script");
   assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
   assert.equal(state.activeJobId, null);
+});
+
+test("script section response with multiple headings merges all sections and advances to save", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "WAITING_FOR_SCRIPT_SECTION",
+    activeJobId: "section-job",
+    activeJobStage: "script_section",
+    activeJobSectionIndex: 1,
+    scriptSectionIndex: 1,
+    scriptExpectedSections: 3,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.handleResponseComplete({
+    jobId: "section-job",
+    response: [
+      "Section 1",
+      "Opening beat.",
+      "",
+      "Chapter 2",
+      "Middle beat.",
+      "",
+      "Chương 3",
+      "Ending beat."
+    ].join("\n")
+  });
+
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 2, 3]);
+  assert.equal(state.scriptSections.length, 3);
+  assert.match(state.scriptSections[0], /^Section 1\nOpening beat\./);
+  assert.match(state.scriptSections[1], /^Chapter 2\nMiddle beat\./);
+  assert.match(state.scriptSections[2], /^Chương 3\nEnding beat\./);
+  assert.equal(state.lastGeneratedScript, state.scriptSections.join("\n\n"));
+  assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
+  assert.equal(state.scriptSectionIndex, 4);
+  assert.equal(state.activeJobId, null);
+});
+
+test("script section response with markdown and Vietnamese doan headings is split", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "WAITING_FOR_SCRIPT_SECTION",
+    activeJobId: "section-job",
+    activeJobStage: "script_section",
+    activeJobSectionIndex: 1,
+    scriptSectionIndex: 1,
+    scriptExpectedSections: 2,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.handleResponseComplete({
+    jobId: "section-job",
+    response: [
+      "## Section 1: Opening",
+      "Opening beat.",
+      "",
+      "**Đoạn 2 — Ending**",
+      "Ending beat."
+    ].join("\n")
+  });
+
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 2]);
+  assert.equal(state.scriptSections.length, 2);
+  assert.match(state.scriptSections[0], /^## Section 1: Opening\nOpening beat\./);
+  assert.match(state.scriptSections[1], /^\*\*Đoạn 2 — Ending\*\*\nEnding beat\./);
+  assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
+});
+
+test("script section response with inline headings on one line is split", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "WAITING_FOR_SCRIPT_SECTION",
+    activeJobId: "section-job",
+    activeJobStage: "script_section",
+    activeJobSectionIndex: 1,
+    scriptSectionIndex: 1,
+    scriptExpectedSections: 2,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.handleResponseComplete({
+    jobId: "section-job",
+    response: "Section 1: Opening beat. Section 2: Ending beat."
+  });
+
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 2]);
+  assert.equal(state.scriptSections.length, 2);
+  assert.equal(state.scriptSections[0], "Section 1: Opening beat.");
+  assert.equal(state.scriptSections[1], "Section 2: Ending beat.");
+  assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
+});
+
+test("script section response with multiple headings pauses when an expected section is missing", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "WAITING_FOR_SCRIPT_SECTION",
+    activeJobId: "section-job",
+    activeJobStage: "script_section",
+    activeJobSectionIndex: 1,
+    scriptSectionIndex: 1,
+    scriptExpectedSections: 3,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.handleResponseComplete({
+    jobId: "section-job",
+    response: [
+      "Section 1",
+      "Opening beat.",
+      "",
+      "Section 3",
+      "Ending beat."
+    ].join("\n")
+  });
+
+  assert.equal(state.status, "paused");
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 3]);
+  assert.equal(state.scriptSectionIndex, 2);
+  assert.equal(state.sheetWorkflowState, "GENERATE_SCRIPT_SECTION");
+  assert.match(state.sheetProgressText, /thieu section 2/);
+});
+
+test("script section response pauses when ChatGPT returns a section beyond expected", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "WAITING_FOR_SCRIPT_SECTION",
+    activeJobId: "section-job",
+    activeJobStage: "script_section",
+    activeJobSectionIndex: 1,
+    scriptSectionIndex: 1,
+    scriptExpectedSections: 2,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls);
+
+  await api.handleResponseComplete({
+    jobId: "section-job",
+    response: [
+      "Section 1",
+      "Opening beat.",
+      "",
+      "Section 2",
+      "Middle beat.",
+      "",
+      "Section 3",
+      "Unexpected extra beat."
+    ].join("\n")
+  });
+
+  assert.equal(state.status, "paused");
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 2]);
+  assert.equal(state.scriptSections.length, 2);
+  assert.equal(state.sheetWorkflowState, "GENERATE_SCRIPT_SECTION");
+  assert.match(state.sheetProgressText, /vuot qua 2/);
+});
+
+test("chat history sync splits a recovered multi-section response before saving", async () => {
+  const state = firstResponseState({
+    sheetWorkflowState: "GENERATE_SCRIPT_SECTION",
+    activeJobId: null,
+    activeJobStage: null,
+    activeJobSectionIndex: null,
+    targetTabId: 123,
+    scriptOutline: "Outline with 3 sections",
+    scriptExpectedSections: 3,
+    scriptSections: [],
+    scriptSectionNumbers: []
+  });
+  const sentPrompts = [];
+  const saveCalls = [];
+  const api = loadBackground(state, sentPrompts, saveCalls, {
+    chatGptTab: { id: 123, url: "https://chatgpt.com/c/test" },
+    chatHistory: [{
+      prompt: "[AUTO_PILOT_SECTION 1/3]\ncontinue",
+      response: [
+        "Section 1",
+        "Opening beat.",
+        "",
+        "Section 2",
+        "Middle beat.",
+        "",
+        "Phần 3",
+        "Ending beat."
+      ].join("\n")
+    }]
+  });
+
+  await api.runSheetWorkflowStep(state);
+
+  assert.deepEqual(Array.from(state.scriptSectionNumbers), [1, 2, 3]);
+  assert.equal(state.scriptSections.length, 3);
+  assert.equal(state.scriptSectionIndex, 4);
+  assert.equal(state.sheetWorkflowState, "SAVE_SCRIPT");
+  assert.equal(saveCalls.length, 0);
 });

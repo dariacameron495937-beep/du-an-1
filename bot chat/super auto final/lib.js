@@ -319,26 +319,98 @@
       /\b(?:het kich ban|het truyen)\.?$/.test(normalized);
   }
 
+  function parseScriptSectionHeadingLine(line, maxCount) {
+    const raw = String(line || "").replace(/[*_`~]/g, "").trim();
+    if (!raw) return 0;
+
+    const normalized = normalizeForMatch(raw)
+      .replace(/^[-*]\s*/, "")
+      .replace(/^#{1,6}\s*/, "");
+    const match = normalized.match(/^(?:section|part|chapter|chap|chuong|phan|doan)\s*#?\s*(\d{1,3})\b/);
+    if (!match) return 0;
+
+    const max = normalizeMaxExpectedSectionCount(maxCount);
+    const sectionNumber = Number(match[1]);
+    return Number.isFinite(sectionNumber) && sectionNumber > 0 && sectionNumber <= max
+      ? sectionNumber
+      : 0;
+  }
+
+  function collectScriptSectionHeadingMatches(line, maxCount) {
+    const rawLine = String(line || "");
+    const max = normalizeMaxExpectedSectionCount(maxCount);
+    const matches = [];
+    const leadingNumber = parseScriptSectionHeadingLine(rawLine, max);
+    if (leadingNumber) {
+      matches.push({ number: leadingNumber, index: 0 });
+    }
+
+    const inlineHeadingPattern = /(?:section|part|chapter|chap|chương|chuong|phần|phan|đoạn|doan)\s*#?\s*(\d{1,3})\s*[:\-–—]/giu;
+    let match;
+    while ((match = inlineHeadingPattern.exec(rawLine)) !== null) {
+      const number = Number(match[1]);
+      if (Number.isFinite(number) && number > 0 && number <= max) {
+        const isDuplicate = matches.some(function (item) {
+          return item.index === match.index || Math.abs(item.index - match.index) <= 3;
+        });
+        if (!isDuplicate) {
+          matches.push({ number: number, index: match.index });
+        }
+      }
+
+      if (match.index === inlineHeadingPattern.lastIndex) {
+        inlineHeadingPattern.lastIndex++;
+      }
+    }
+
+    return matches.sort(function (a, b) { return a.index - b.index; });
+  }
+
   function extractLeadingScriptSectionNumber(value) {
     const lines = String(value == null ? "" : value)
       .replace(/\r\n?/g, "\n")
       .split("\n");
 
     for (let i = 0; i < Math.min(lines.length, 12); i++) {
-      const line = String(lines[i] || "").replace(/[*_`~]/g, "").trim();
+      const line = String(lines[i] || "").trim();
       if (!line) continue;
 
-      const normalized = normalizeForMatch(line).replace(/^\s*#{1,6}\s*/, "");
-      const match = normalized.match(/^(?:section|part|chapter|chap|chuong|phan|doan)\s*#?\s*(\d{1,3})\b/);
-      if (!match) return 0;
-
-      const sectionNumber = Number(match[1]);
-      return Number.isFinite(sectionNumber) && sectionNumber > 0 && sectionNumber <= 300
-        ? sectionNumber
-        : 0;
+      return parseScriptSectionHeadingLine(line, DEFAULT_MAX_EXPECTED_SECTIONS);
     }
 
     return 0;
+  }
+
+  function parseScriptSections(value, maxCount) {
+    const max = normalizeMaxExpectedSectionCount(maxCount);
+    const text = String(value == null ? "" : value).replace(/\r\n?/g, "\n");
+    const lines = text.split("\n");
+    const headings = [];
+    let offset = 0;
+
+    lines.forEach(function (line, index) {
+      collectScriptSectionHeadingMatches(line, max).forEach(function (heading) {
+        headings.push({
+          number: heading.number,
+          lineIndex: index,
+          offset: offset + heading.index
+        });
+      });
+      offset += line.length + 1;
+    });
+
+    return headings.map(function (heading, index) {
+      const nextHeading = headings[index + 1];
+      const response = text
+        .slice(heading.offset, nextHeading ? nextHeading.offset : text.length)
+        .trim();
+      return {
+        number: heading.number,
+        response: response
+      };
+    }).filter(function (item) {
+      return item.response;
+    });
   }
 
   function splitWebAppUrlAndToken(rawUrl) {
@@ -415,7 +487,9 @@
     isFinalScriptResponseText: isFinalScriptResponseText,
     detectExpectedSectionCount: detectExpectedSectionCount,
     detectNumberedOutlineCount: detectNumberedOutlineCount,
+    parseScriptSectionHeadingLine: parseScriptSectionHeadingLine,
     extractLeadingScriptSectionNumber: extractLeadingScriptSectionNumber,
+    parseScriptSections: parseScriptSections,
     splitWebAppUrlAndToken: splitWebAppUrlAndToken
   };
 });
