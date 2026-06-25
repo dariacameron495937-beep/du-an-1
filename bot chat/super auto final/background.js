@@ -836,6 +836,55 @@ function extractScriptSectionNumber(text) {
   return AutoPilotLib.extractLeadingScriptSectionNumber(text);
 }
 
+function parseScriptSections(text, maxCount) {
+  return AutoPilotLib.parseScriptSections(text, maxCount);
+}
+
+function buildScriptSectionItemsFromResponse(responseText, {
+  expectedSections = 0,
+  fallbackNumber = 0,
+  trackedNumber = 0,
+  allowMultiple = true
+} = {}) {
+  const allParsedItems = parseScriptSections(responseText);
+  const overflowSectionNumbers = expectedSections
+    ? allParsedItems
+      .map((item) => Number(item.number) || 0)
+      .filter((number) => number > expectedSections)
+    : [];
+  const parsedItems = expectedSections
+    ? allParsedItems.filter((item) => Number(item.number) <= expectedSections)
+    : allParsedItems;
+
+  if (allowMultiple && parsedItems.length > 1) {
+    return {
+      items: parsedItems,
+      firstSectionNumber: parsedItems[0].number,
+      lastSectionNumber: parsedItems[parsedItems.length - 1].number,
+      usedMultiSectionParser: true,
+      hadParsedSections: true,
+      overflowSectionNumbers
+    };
+  }
+
+  const responseNumber = extractScriptSectionNumber(responseText);
+  const number = Number(trackedNumber) || responseNumber || Number(fallbackNumber) || 0;
+  const response = String(responseText || "").trim();
+  return {
+    items: parsedItems.length === 1
+      ? parsedItems
+      : (number && response && !allParsedItems.length ? [{ number, response }] : []),
+    firstSectionNumber: (allParsedItems[0] && allParsedItems[0].number) || responseNumber || number,
+    lastSectionNumber: (
+      parsedItems[parsedItems.length - 1] &&
+      parsedItems[parsedItems.length - 1].number
+    ) || responseNumber || number,
+    usedMultiSectionParser: false,
+    hadParsedSections: allParsedItems.length > 0,
+    overflowSectionNumbers
+  };
+}
+
 function extractTrackedPromptSectionNumber(promptText) {
   const text = String(promptText || "");
   const markerMatch = text.match(/\[AUTO_PILOT_(?:SECTION|CHUONG)\s+(\d{1,3})(?:\s*\/\s*(?:\d{1,3}|\?))?\]/i);
@@ -1679,12 +1728,13 @@ async function syncScriptStateFromTab(state) {
             }
           } else {
             let trackedNumber = extractTrackedPromptSectionNumber(promptText);
-            const responseNumber = extractScriptSectionNumber(responseText);
             const fallbackNumber = sectionItems.length + 1;
-            sectionItems.push({
-              number: trackedNumber || responseNumber || fallbackNumber,
-              response: responseText
+            const parsed = buildScriptSectionItemsFromResponse(responseText, {
+              expectedSections: state.scriptExpectedSections || 0,
+              fallbackNumber,
+              trackedNumber
             });
+            parsed.items.forEach((sectionItem) => sectionItems.push(sectionItem));
           }
         } else if (!isScriptGuidancePrompt(promptText, state)) {
           scriptOutline = responseText;
@@ -2750,7 +2800,23 @@ async function handleSheetResponse(state, responseText, domOutlineSectionCount =
     const expectedSections = state.scriptExpectedSections || 0;
 
     const isFinalContinueResponse = Boolean(expectedSections && requestedSection > expectedSections);
-    const responseSection = isFinalContinueResponse ? 0 : extractScriptSectionNumber(responseText);
+    const parsedResponse = isFinalContinueResponse
+      ? {
+        items: [],
+        firstSectionNumber: 0,
+        lastSectionNumber: 0,
+        usedMultiSectionParser: false,
+        hadParsedSections: false,
+        overflowSectionNumbers: []
+      }
+      : buildScriptSectionItemsFromResponse(responseText, {
+        expectedSections,
+        fallbackNumber: requestedSection,
+        trackedNumber: requestedSection
+      });
+    const responseSection = isFinalContinueResponse ? 0 : (
+      parsedResponse.firstSectionNumber || extractScriptSectionNumber(responseText)
+    );
 
     if (!isFinalContinueResponse && expectedSections && requestedSection && !responseSection) {
       await pauseOnError(
@@ -2781,6 +2847,15 @@ async function handleSheetResponse(state, responseText, domOutlineSectionCount =
       }
       scriptSectionNumbers = currentNumbers;
       currentSection = expectedSections;
+    } else if (parsedResponse.items.length) {
+      const merged = mergeScriptSectionItems(currentSections, currentNumbers, parsedResponse.items);
+      scriptSections = merged.sections;
+      scriptSectionNumbers = merged.numbers;
+      currentSection = parsedResponse.lastSectionNumber || responseSection || requestedSection;
+    } else if (parsedResponse.hadParsedSections) {
+      scriptSections = [...currentSections];
+      scriptSectionNumbers = [...currentNumbers];
+      currentSection = responseSection || requestedSection;
     } else {
       currentSection = responseSection || requestedSection;
       const merged = mergeScriptSectionItems(currentSections, currentNumbers, [{
@@ -2803,6 +2878,27 @@ async function handleSheetResponse(state, responseText, domOutlineSectionCount =
 
     if (responseSection && requestedSection && responseSection !== requestedSection) {
       await addLog(`Canh bao: Bot yeu cau section ${requestedSection} nhung ChatGPT tra ve Section ${responseSection}. Da canh theo so section thuc te.`, "warning");
+    }
+
+    if (parsedResponse.overflowSectionNumbers && parsedResponse.overflowSectionNumbers.length) {
+      const overflowNumbers = Array.from(new Set(parsedResponse.overflowSectionNumbers)).sort((a, b) => a - b);
+      await pauseOnError(
+        `ChatGPT tra ve section vuot qua so luong du kien (${overflowNumbers.join(", ")} > ${expectedSections}). Can kiem tra chat truoc khi luu.`,
+        {
+          scriptSections,
+          scriptSectionNumbers,
+          scriptSectionIndex: nextSection,
+          lastGeneratedScript,
+          sheetWorkflowState: "GENERATE_SCRIPT_SECTION",
+          sheetProgressText: `Da tam dung vi ChatGPT tra ve section vuot qua ${expectedSections}.`,
+          activeJobId: null,
+          activeJobStage: null,
+          activeJobStartedAt: null,
+          activeJobSectionIndex: null,
+          scriptFinalContinueAttempts: finalContinueAttempts
+        }
+      );
+      return;
     }
 
     if (missingSections.length && (shouldSave || isBeyondExpected)) {
